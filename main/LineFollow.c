@@ -6,9 +6,15 @@
 #include "MPU.h"
 #include "TUNING.h"
 
+#define t_turn 2
+#define plus_turn 3
+#define left_t_turn 2
+#define right_t_turn 2
+
 adc1_channel_t channel[4] = {ADC_CHANNEL_7, ADC_CHANNEL_6, ADC_CHANNEL_0, ADC_CHANNEL_3};
 int weights[4] = {3,1,-1,-3};
 int q,p,r;
+
 /*
  * Line Following PID Constants
  */
@@ -164,6 +170,30 @@ void odometry()
 
 }
 
+void move_forward_inch()
+{
+    // move forward by a 2 inch
+}
+
+void save_to_flash()
+{
+    // function to final solution to the flash memory
+}
+
+void solve_maze()
+{
+    // function to travel the maze with solution in flash memory
+}
+/* there are 8 possible cases:
+1. left turn
+2. right turn
+3. T junction
+4. left and straight turn
+5. right and straight turn
+6. Four way junction
+7. u turn
+8. end of maze
+*/
 
 void line_follow_task(void *arg)
 {
@@ -187,8 +217,9 @@ void line_follow_task(void *arg)
     printf("\n");
     bot_forward(MCPWM_UNIT_0, MCPWM_TIMER_0, left_pwm, right_pwm);  
 
-    if(sensor_value[0] < 400  && sensor_value[1] > 900  && sensor_value[2] > 900  && sensor_value[3] > 900)
+    if(sensor_value[0] < 400  && sensor_value[1] > 900  && sensor_value[2] > 900  && sensor_value[3] > 900 // && front sensor black)
     {
+        // case 1. left turn
         turn = 'L';
         printf("turn detected: %c  ", turn);
         q=1;
@@ -205,8 +236,9 @@ void line_follow_task(void *arg)
         printf("\n");
     }
 
-    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900  && sensor_value[3] < 400) 
+    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900  && sensor_value[3] < 400 // && front sensor black) 
     {
+        // case 2. right turn
         turn = 'R';
         printf("turn detected: %c  ", turn);
         p = 1;
@@ -223,8 +255,9 @@ void line_follow_task(void *arg)
         printf("\n");
     }
        
-    else if (sensor_value[0] < 100 && sensor_value[1] < 100 && sensor_value[2] < 100 && sensor_value[3] < 100)
+    else if (sensor_value[0] < 100 && sensor_value[1] < 100 && sensor_value[2] < 100 && sensor_value[3] < 100 // && front sensor black)
     {
+        // case 7. u-turn
         turn = 'B';
         printf("turn detected: %c  ", turn);
         r = 1;
@@ -239,7 +272,37 @@ void line_follow_task(void *arg)
             printf("sensor value[%d]: %f  ", i, sensor_value[i]);
         }
         printf("\n");
-    }   
+    }  
+
+    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900 && sensor_value[3] > 900 // && front sensor black)
+    {
+        // case 3. T turn
+        /* code */
+    }
+
+    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900 && sensor_value[3] > 900 // && front sensor white)
+    {
+        // case 4. left and straight turn
+        /* code */
+    }
+
+    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900 && sensor_value[3] > 900 // && front sensor white)
+    {
+        // case 5. right and straight turn
+        /* code */
+    }
+
+    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900 && sensor_value[3] > 900 // && front sensor white)
+    {
+        // case 6. four way junction
+        // move forward by 2 inches
+        // if all white still, then end box
+        // or else + junction
+
+        // or put a extra sensor 
+        // 
+        /* code */
+    }
   }
 }
 
