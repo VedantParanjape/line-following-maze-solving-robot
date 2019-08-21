@@ -11,9 +11,15 @@
 #define left_t_turn 2
 #define right_t_turn 2
 
-adc1_channel_t channel[4] = {ADC_CHANNEL_7, ADC_CHANNEL_6, ADC_CHANNEL_0, ADC_CHANNEL_3};
+adc1_channel_t channel[4] = {ADC_CHANNEL_7, ADC_CHANNEL_6, ADC_CHANNEL_0, ADC_CHANNEL_3}; //ADC CHANNEL 5 used for front sensor // ADC CHANNEL 4 used for encoder
 int weights[4] = {3,1,-1,-3};
-int q,p,r;
+
+// used for turning code
+int q,p,r,s;
+
+// tag for checking turns
+bool l_turn_present = false, r_turn_present = false, s_turn_present = false, dead_turn_present = false, on_a_junction = false; 
+//
 
 /*
  * Line Following PID Constants
@@ -37,8 +43,16 @@ float error=0, prev_error, difference, cumulative_error, correction;
 
 uint32_t adc_reading[4];
 float sensor_value[4];
-uint32_t adc_turn_reading[2];
-float sensor_turn_value[2];
+
+uint32_t front_sensor;
+float front_sensor_value;
+
+uint32_t encoder_sensor;
+float encoder_sensor_value;
+
+// for encoder
+bool current = false, former = false;
+int counter = 0;
 
 static void read_sensors()
 {
@@ -47,6 +61,12 @@ static void read_sensors()
         adc_reading[i] = adc1_get_raw(channel[i]);
         // printf("raw[%d]: %d ",i, adc_reading[i]);
     }
+    front_sensor = adc1_get_raw(ADC_CHANNEL_5);
+}
+
+static void read_encoder_sensor()
+{
+    encoder_sensor = adc1_get_raw(ADC_CHANNEL_4);
 }
 
 static void calc_sensor_values()
@@ -57,6 +77,14 @@ static void calc_sensor_values()
         sensor_value[i] = constrain(sensor_value[i],0,1000);
         // printf("fil[%d]: %f ", i, sensor_value[i]); 
     }
+    front_sensor_value = map(front_sensor, 1700, 4000, 0, 1000);
+    front_sensor_value = constrain(front_sensor_value,0,1000);
+}
+
+static void calc_encoder_sensor_values()
+{
+    encoder_sensor_value = map(encoder_sensor, 1700, 4000, 0, 1000);
+    encoder_sensor_value = constrain(encoder_sensor_value, 0, 1000);
 }
 
 static void calculate_error()
@@ -112,8 +140,42 @@ static void calculate_correction()
     prev_error = error;
 }
 
+void follow_path()
+{
+    s = 1;
+
+    while(s == 1)
+    {
+        read_sensors();
+        calc_sensor_values();
+        calculate_error();
+        calculate_correction();
+        
+        left_pwm = constrain((opt + correction), lower_pwm_constrain, higher_pwm_constrain);
+        right_pwm = constrain((opt - correction), lower_pwm_constrain, higher_pwm_constrain);
+         
+        for(int i=0;i<4;i++)
+        {
+            printf("sensor value[%d]: %f  ", i, sensor_value[i]);
+        }
+
+        printf("front: %f", front_sensor_value);    
+        printf("\n");
+        bot_forward(MCPWM_UNIT_0, MCPWM_TIMER_0, left_pwm, right_pwm);  
+
+        if (!(sensor_value[0] < 400  && sensor_value[1] > 900  && sensor_value[2] > 900  && sensor_value[3] < 400))
+        {
+            s = 0;
+        }
+    }
+}
+
 void turnbot(char d)
 {
+    q = 1;
+    p = 1;
+    r = 1;
+
     if (d == 'L')
     {
         while (q==1)
@@ -167,12 +229,26 @@ void turnbot(char d)
 
 void odometry()
 {
+    read_encoder_sensor();
+    calc_encoder_sensor_values();
 
-}
+    if(encoder_sensor_value < 100)
+    {
+        current = true;
+    }
+    else
+    {
+        current = false;
+    }
 
-void move_forward_inch()
-{
-    // move forward by a 2 inch
+    if(current != former && current == true)
+    {
+        counter = counter + 1;
+    }
+
+    former = current;
+
+    printf("encoder ticks count: %d\n", counter);
 }
 
 void save_to_flash()
@@ -184,6 +260,47 @@ void solve_maze()
 {
     // function to travel the maze with solution in flash memory
 }
+
+// function to return to previous node
+void return_back(char prev_turn)
+{
+    if(prev_turn == 'L')
+    {
+        turnbot('B');
+        follow_path();
+
+        vTaskDelay(200/portTICK_PERIOD_MS);
+        bot_stop(MCPWM_UNIT_0, MCPWM_TIMER_0);
+        vTaskDelay(200/portTICK_PERIOD_MS);
+        
+        turnbot('L');
+    }
+
+    else if(prev_turn == 'R')
+    {
+        turnbot('B');
+        follow_path();
+
+        vTaskDelay(200/portTICK_PERIOD_MS);
+        bot_stop(MCPWM_UNIT_0, MCPWM_TIMER_0);
+        vTaskDelay(200/portTICK_PERIOD_MS);
+        
+        turnbot('R');
+    }
+
+    else if(prev_turn == 'S')
+    {
+        turnbot('B');
+        follow_path();
+
+        vTaskDelay(200/portTICK_PERIOD_MS);
+        bot_stop(MCPWM_UNIT_0, MCPWM_TIMER_0);
+        vTaskDelay(200/portTICK_PERIOD_MS);
+        
+        turnbot('B');
+    }
+}
+
 /* there are 8 possible cases:
 1. left turn
 2. right turn
@@ -194,6 +311,17 @@ void solve_maze()
 7. u turn
 8. end of maze
 */
+
+void maze_discovery()
+{
+ // this function is called once a node is found, it process the given information and then gives the turn to take
+
+ // uses the Variables
+ // 1. l_turn_present
+ // 2. s_turn_present
+ // 3. r_turn_present 
+ // 4. dead_turn_present
+}
 
 void line_follow_task(void *arg)
 {
@@ -213,96 +341,157 @@ void line_follow_task(void *arg)
     for(int i=0;i<4;i++)
     {
         printf("sensor value[%d]: %f  ", i, sensor_value[i]);
-    }    
+    }
+    printf("front: %f", front_sensor_value);    
     printf("\n");
     bot_forward(MCPWM_UNIT_0, MCPWM_TIMER_0, left_pwm, right_pwm);  
 
-    if(sensor_value[0] < 400  && sensor_value[1] > 900  && sensor_value[2] > 900  && sensor_value[3] > 900 // && front sensor black)
+    on_a_junction = false; // set it to false, it will become true only if a junction detected
+
+    if(sensor_value[0] < 400  && sensor_value[1] > 900  && sensor_value[2] > 900  && sensor_value[3] > 900) 
     {
         // case 1. left turn
+        //    sub case. when there's a straight turn.
         turn = 'L';
         printf("turn detected: %c  ", turn);
         q=1;
+        
+        on_a_junction = true;
 
         vTaskDelay(200/portTICK_PERIOD_MS);
         bot_stop(MCPWM_UNIT_0, MCPWM_TIMER_0);
-        vTaskDelay(200/portTICK_PERIOD_MS);    
-        turnbot(turn);
+        vTaskDelay(200/portTICK_PERIOD_MS);
+        
+        if(front_sensor_value < 200)
+        {
+            // simple left turn
+            l_turn_present = true;
+            s_turn_present = false;
+            r_turn_present = false;
+            dead_turn_present = false;
 
+            turnbot(turn);
+        }
+        else if(front_sensor_value > 500)
+        {
+            // when a straight is also possible
+            l_turn_present = true;
+            s_turn_present = true;
+            r_turn_present = false;
+            dead_turn_present = false;
+
+            printf("left T turn detected\n");
+        }
+        
         for(int i=0;i<4;i++)
         {
             printf("sensor value[%d]: %f  ", i, sensor_value[i]);
         }
+
+        printf("front: %f", front_sensor_value);
         printf("\n");
     }
 
-    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900  && sensor_value[3] < 400 // && front sensor black) 
+    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900  && sensor_value[3] < 400) 
     {
         // case 2. right turn
+        //    sub case. when there's a straight turn.
         turn = 'R';
         printf("turn detected: %c  ", turn);
         p = 1;
         
+        on_a_junction = true;
+
         vTaskDelay(200/portTICK_PERIOD_MS);
         bot_stop(MCPWM_UNIT_0, MCPWM_TIMER_0);
         vTaskDelay(200/portTICK_PERIOD_MS);    
-        turnbot(turn);
+        
+        if(front_sensor_value < 200)
+        {
+            // simple right turn
+            l_turn_present = false;
+            s_turn_present = false;
+            r_turn_present = true;
+            dead_turn_present = false;
 
+            turnbot(turn);
+        }
+        else if(front_sensor_value > 500)
+        {
+            // when a straight turn is also possible
+            l_turn_present = false;
+            s_turn_present = true;
+            r_turn_present = true;
+            dead_turn_present = false;
+
+            printf("right T turn detected\n");
+        }
+        
         for(int i=0;i<4;i++)
         {
             printf("sensor value[%d]: %f  ", i, sensor_value[i]);
         }
+        printf("front: %f", front_sensor_value);
         printf("\n");
     }
        
-    else if (sensor_value[0] < 100 && sensor_value[1] < 100 && sensor_value[2] < 100 && sensor_value[3] < 100 // && front sensor black)
+    else if (sensor_value[0] < 100 && sensor_value[1] < 100 && sensor_value[2] < 100 && sensor_value[3] < 100) 
     {
         // case 7. u-turn
         turn = 'B';
         printf("turn detected: %c  ", turn);
         r = 1;
-          
+
+        on_a_junction = true;
+
         vTaskDelay(200/portTICK_PERIOD_MS);
         bot_stop(MCPWM_UNIT_0, MCPWM_TIMER_0);
-        vTaskDelay(200/portTICK_PERIOD_MS);    
+        vTaskDelay(200/portTICK_PERIOD_MS); 
+
+        l_turn_present = false;
+        s_turn_present = false;
+        r_turn_present = false;
+        dead_turn_present = true;
+               
         turnbot(turn);
 
         for(int i=0;i<4;i++)
         {
             printf("sensor value[%d]: %f  ", i, sensor_value[i]);
         }
+        printf("front: %f", front_sensor_value);
         printf("\n");
     }  
 
-    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900 && sensor_value[3] > 900 // && front sensor black)
+    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900 && sensor_value[3] > 900) 
     {
         // case 3. T turn
-        /* code */
+        //    sub case. when there's a straight path ahead.
+        //    sub case. when we reach the end point
+        //       condition. all sensors white and the extra sensor also white which is black otherwise
+        on_a_junction = true;
+         
+        if(front_sensor_value < 200)
+        {
+            // T turn 
+            l_turn_present = true;
+            s_turn_present = false;
+            r_turn_present = true;
+            dead_turn_present = false;
+            printf("t turn detected\n");
+        }
+        else if(front_sensor_value > 500)
+        {
+            // + turn
+            l_turn_present = true;
+            s_turn_present = true;
+            r_turn_present = true;
+            dead_turn_present = false;
+            printf("+ turn detected\n");
+        }
     }
 
-    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900 && sensor_value[3] > 900 // && front sensor white)
-    {
-        // case 4. left and straight turn
-        /* code */
-    }
-
-    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900 && sensor_value[3] > 900 // && front sensor white)
-    {
-        // case 5. right and straight turn
-        /* code */
-    }
-
-    else if (sensor_value[0] > 900 && sensor_value[1] > 900 && sensor_value[2] > 900 && sensor_value[3] > 900 // && front sensor white)
-    {
-        // case 6. four way junction
-        // move forward by 2 inches
-        // if all white still, then end box
-        // or else + junction
-
-        // or put a extra sensor 
-        // 
-        /* code */
-    }
+    // if on_a_junction = true, call maze_discovery() function here, it will tell the turn to take the give the handle back to the low iq while loop
   }
 }
 
